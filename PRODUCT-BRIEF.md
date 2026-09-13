@@ -1,7 +1,8 @@
 # Plant Watering — product brief v0
 
-> **Status: draft for review.** Nothing here is built yet. This document exists to be edited and
-> approved before a spec is written. Open decisions are in §7.
+> **Status: draft for review, rev. 1.** Nothing here is built yet. This document exists to be
+> edited and approved before a spec is written. The four framing decisions were answered on
+> 2026-09-13 (§6); what is still open is in §10.
 > Author: Claude · Date: 2026-09-13 · Owner: Vadim Smirnov
 
 ---
@@ -156,70 +157,163 @@ Credibility is the whole asset here. Three explicit boundaries:
 
 ---
 
-## 6 · Scope
+## 6 · Decisions — answered 2026-09-13
+
+| # | Decision | Answer |
+|---|---|---|
+| **D1** | Alert channel | **Telegram bot.** Already wired into the AI OS, pushes to the phone, and the three feedback buttons are native inline keyboards — no UI to build |
+| **D2** | Environment data | **Xiaomi Smart Air Purifier 4 Pro**, read directly. See §7 — this is now the most interesting part of the build, and it opens one sub-question |
+| **D3** | Scope | **Multi-plant data model, one profile shipped (Monstera).** Adding a ficus later is a config entry, not a refactor |
+| **D4** | Feedback | **Full loop.** Finger test on every alert, three-button answer, `B` recalibrates |
+
+**D2 is a genuinely better answer than the hybrid I proposed.** A weather API plus a guessed indoor
+offset is a model of the apartment; the purifier is a thermometer *in* the apartment. It removes the
+single largest source of error in §3, which was the winter case: outdoor −2 °C while the room sits at
+23 °C on radiators.
+
+---
+
+## 7 · The sensor — Xiaomi Smart Air Purifier 4 Pro
+
+### 7.1 · What it gives, and that it is reachable
+
+The Air Purifier 4 Pro is model **`zhimi.airp.vb4`**, and it is supported by
+[python-miio](https://python-miio.readthedocs.io/en/latest/api/miio.integrations.zhimi.airpurifier.airpurifier_miot.html)
+via the `AirPurifierMiot` class over Xiaomi's MIoT protocol. It exposes, among other properties:
+
+| Property | Used for |
+|---|---|
+| `temperature` | **`T` factor** — replaces the weather API entirely |
+| `humidity` | **`H` factor** — replaces the estimate entirely |
+| `fan_level` / `mode` | Candidate **`F` factor**, see §7.4. Not in v1 |
+| `aqi` (PM2.5), PM10 | Not used. Interesting, irrelevant to watering |
+
+This is a **local network** protocol, not a cloud API. It needs two things: the device's **LAN IP**
+and its **32-character device token**. That has one consequence that shapes the whole architecture —
+§8.
+
+> ⚠️ **Vadim does the token extraction himself.** It is pulled from the Xiaomi account with the
+> standard `Xiaomi-cloud-tokens-extractor` tool, which wants the Mi account login. I do not touch
+> those credentials at any point. The token goes into `.env`, which is already gitignored.
+
+### 7.2 · Two things to verify before writing a line of code
+
+1. **Is the purifier in the same room as the Monstera?** If it is in the bedroom and the plant is in
+   the living room, the reading is precise and wrong. Same room, and ideally not blowing directly at
+   the plant.
+2. **Does its temperature reading match reality?** Sensors mounted inside a running appliance sit
+   near their own electronics and in their own airflow, and typically read warm. Before trusting it:
+   put any independent thermometer next to the purifier for an hour and compare. Whatever the gap
+   is, it becomes a fixed `sensor_offset_c` in the config.
+
+   This matters more than it sounds. `T` doubles per +10 °C, so a **+2 °C** sensor bias inflates
+   every daily depletion estimate by about **15%** — which is the difference between a 12-day and a
+   14-day winter interval, in exactly the season where erring wet is how the plant dies.
+
+   Mitigating detail: the §3.3 feedback loop absorbs a constant bias anyway, because `B` moves to
+   compensate. So a wrong offset costs accuracy for two or three cycles, not forever. Calibrate
+   anyway — it makes the first month right instead of the second.
+
+### 7.3 · Failure handling — the sensor will be unreachable sometimes
+
+Purifier off, unplugged, moved, Wi-Fi rebooted, token rotated. The model must degrade, not stop:
+
+| Reading age | Behaviour |
+|---|---|
+| < 36 h | Use it. Normal operation |
+| 36 h – 7 days | Use the last known value, unchanged. Indoor temperature in a heated flat moves slowly; this costs almost nothing |
+| > 7 days | Fall back to a seasonal default for Belgrade, and **say so in the alert**: "running without a sensor reading since \<date\>" |
+| Reading out of plausible range (< 5 °C or > 40 °C, RH < 10% or > 95%) | Discard, treat as missing. A sensor fault must never become a watering decision |
+
+### 7.4 · A free extra the purifier makes possible — not v1
+
+We are already reading the device state, so `fan_level` is available at no cost. A purifier running
+on high moves air across the leaves, which raises transpiration. Physically real, probably a
+5–15% effect, and entirely swamped by `B` recalibration if the fan setting is steady.
+
+**Deliberately excluded from v1.** It is only worth adding if the logged data later shows that alert
+accuracy is worse in weeks when the fan ran hard. That is a question the accuracy log can answer on
+its own, which is the right reason to add a factor rather than a plausible story about airflow.
+
+---
+
+## 8 · Architecture — the one thing still open
+
+**The conflict:** D1 wants alerts that arrive whether or not the laptop is open. D2's sensor is on
+the home LAN and cannot be read from a VPS. Those pull in opposite directions.
+
+| | **A · Mac only** *(recommended for v1)* | **B · Split: Mac collects, VPS alerts** |
+|---|---|---|
+| Where the model runs | Mac, `launchd`, once a day | Existing VPS, cron |
+| How the reading arrives | Direct LAN poll of the purifier | Mac polls the purifier, POSTs the reading to the VPS |
+| Telegram button taps | Collected by `getUpdates` polling on the next run — **no webhook, no always-on listener** | Webhook or long-poll on the VPS |
+| Moving parts | One script, one plist, one JSON file | Two services, one endpoint, one shared secret |
+| Fails when | The Mac is closed for days | Almost never |
+| Effort | ~1 evening | ~2–3× that |
+
+**Recommendation: A.** It is the whole product in one script, with direct access to the sensor and
+no infrastructure. `launchd` runs a missed daily job at the next wake, so a morning alert lands when
+the laptop opens — which is when he would water anyway.
+
+**The known hole in A, stated plainly:** **7–17 November**, ten days in Germany and Austria with the
+laptop presumably closed at least part of it. That is one missed watering window. Two honest ways to
+handle it without building B: the model can fire an early "you are about to travel, water it
+thoroughly before you go" alert from a manually entered away-window, and can suppress alerts during
+it. That is ten lines of code instead of a second service.
+
+**B is a clean upgrade, not a rewrite** — the collector/model split is in the design from day one,
+so promoting it later means changing where two functions run, not restructuring anything.
+
+---
+
+## 9 · Scope
 
 ### In v1
-- One plant profile: **Monstera deliciosa**, with the setup constants from §3.2
-- The water-balance model, evaluated once daily
-- Daylight computed from date + Belgrade latitude (no dependency, pure arithmetic)
-- Temperature and humidity input — **source is open decision D2**
-- One alert channel — **channel is open decision D1**
-- The three-button feedback loop and the `B` recalibration
-- A watering log (date, answer given, model state) as a local JSON file
-- The four safety overrides from §3.4
-- A visible accuracy counter — "last 10 alerts: 8 correct"
+- Telegram bot: one daily check, alert + three inline buttons, plus a `/watered` command
+- The §3 water-balance model, evaluated once daily
+- Daylight from date + Belgrade latitude — pure arithmetic, no dependency
+- Temperature and humidity from the Air Purifier 4 Pro, with `sensor_offset_c` and the §7.3 fallback ladder
+- Plant profiles as data (multi-plant capable); **Monstera deliciosa is the only profile shipped**
+- The §3.3 feedback loop and `B` recalibration
+- The four §3.4 safety overrides
+- A local JSON log: every reading, every alert, every answer, every `B` change
+- `/stats` — the accuracy counter from §1, so the model can be judged instead of trusted
+- An away-window (§8) so the November trip does not silently break the record
 
 ### Explicitly not in v1
-- Multiple plants (unless D3 says otherwise) · fertilizer track · repotting reminders ·
-  symptom decoder · photos and growth log · physical sensors · any cloud service or account ·
-  any UI beyond the alert channel itself
+Fertilizer track · repotting reminders · the §5 symptom decoder · the `F` airflow factor · photos
+and growth log · charts · any web UI · any second plant profile · any cloud account beyond Telegram
 
 ### Non-functional
-- **Runs unattended.** One scheduled job per day; no laptop-open requirement if D1 allows it
-- **No account, no server bill.** Local state file, free weather API at most
-- **Repo is English-only** and safe to make public — a plant-watering model is a clean, small public
-  artifact, unlike the rest of `Personal Projects/`
+- **Python 3.11+** in a venv — `python-miio` needs it, and the system Python here is 3.9.6
+- Dependencies kept to `python-miio` and one Telegram client. The model itself is stdlib arithmetic
+- Secrets in `.env` — Telegram token, device token, device IP. Never in a tracked file
+- **Repo is English-only and safe to publish.** A calibrated water-demand model with a documented
+  accuracy metric is a decent small public artifact; there is nothing confidential in it
 
 ---
 
-## 7 · Open decisions — need Vadim
+## 10 · Open questions for Vadim
 
-| # | Decision | Why it blocks | Default if unanswered |
-|---|---|---|---|
-| **D1** | **Where does the alert land?** Telegram bot · web/PWA · macOS notification · iOS app | Determines the entire stack and whether the reminder reaches a phone | Telegram — already wired into the AI OS, pushes to phone, zero UI work |
-| **D2** | **Where does temperature come from?** Manual seasonal estimate · Open-Meteo API for Belgrade + an indoor offset · a real sensor | Winter indoor temp is decoupled from outdoor. An API alone is wrong exactly when the risk is highest | Hybrid: API + a manual indoor offset he corrects when it feels off |
-| **D3** | **One plant or many?** | Changes the data model. Cheap now, expensive later | Multi-plant data model, Monstera as the only profile shipped |
-| **D4** | **How much input is he willing to give?** Full loop (tap "watered" + answer the finger test) · minimal (just "watered") · zero | The loop is what makes the model better than a calendar. Without it, §1's target is unreachable | Full loop — three taps a fortnight |
-
-### Assumptions already made (correct them if wrong)
-
-1. Location is **Belgrade, 44.8 °N** — hardcoded for the daylight curve.
-2. The apartment has **central heating in winter** and no AC-driven summer cooling — i.e. indoor temp
-   is high in summer and moderate-warm in winter.
-3. He is willing to run a scheduled job (cron / launchd / a cheap VPS — one already exists per
-   `vps-status-dashboard`).
-4. This is a **personal tool first**, portfolio artifact second. If it is meant to be a public
-   portfolio piece, the README and the model documentation get a different register — say so.
+1. **Architecture A or B?** §8. Recommendation is A.
+2. **Is the purifier in the same room as the Monstera?** §7.2. If not, the whole D2 answer weakens
+   and the hybrid from the original D2 comes back.
+3. **Pot facts, for `G` in §3.2** — material (terracotta or plastic/glazed), rough diameter,
+   substrate (chunky aroid mix or normal potting soil), and how the plant sits in it (root-bound,
+   balanced, or small plant in a big pot). Guessing these costs two or three extra calibration
+   cycles; a 30-second answer removes that.
+4. **When was it last watered, and roughly how often have you been watering it?** Seeds `B` near the
+   truth instead of at a generic default, and starts the log with a real state instead of an empty one.
+5. **Public repo or private?** Affects the README's register, nothing else. Default: build it
+   publishable, decide at push time.
 
 ---
 
-## 8 · Candidate stacks, once D1 is answered
+## 11 · What happens after approval
 
-| If D1 is… | Stack | Effort | Runs when laptop is closed |
-|---|---|---|---|
-| **Telegram** | Node or Python script + Telegram Bot API + cron on the existing VPS | **Lowest** | ✅ |
-| **Web / PWA** | Static page + local storage, or a tiny Node server; web push | Medium | ⚠️ push is fiddly on iOS |
-| **macOS only** | Python + launchd + `osascript` notification | Low | ❌ |
-| **iOS native** | Swift + local notifications + a tiny model in-app | Highest | ✅ |
-
-In all four cases the model itself is the same ~150 lines and is written once, separately from the
-delivery channel.
-
----
-
-## 9 · What happens after approval
-
-1. Vadim edits this file / answers §7 → approves
-2. `SPEC.md` — data model, module boundaries, alert copy, test cases with expected intervals
-3. Build, plus a backtest: run the model over a synthetic Belgrade year and check the predicted
-   intervals are sane (roughly 6–8 days in July, 14–18 in January) before it ever sends an alert
+1. Vadim edits this file / answers §10 → approves
+2. `SPEC.md` — data model, module boundaries, the exact Telegram copy, config schema, and test cases
+   with expected intervals
+3. Build, then a **backtest before it ever sends an alert**: run the model over a synthetic Belgrade
+   year and confirm the predicted intervals are sane — roughly **6–8 days in July, 14–18 in January**.
+   If the backtest disagrees with that, the coefficients are wrong and the plant never finds out
