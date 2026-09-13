@@ -53,15 +53,20 @@ depletes a little every day. The rate of depletion is what the conditions change
 ```
 S(0)   = 1.0                      # full pot, right after watering to runoff
 S(t+1) = S(t) − D(t)              # today's depletion
-D(t)   = B × T(t) × L(t) × H(t) × G
+D(t)   = B × T(t) × L(t) × H(t)
 
 alert when S(t) <= 0.25           # top 3–5 cm dry — the Monstera "water now" point
 ```
 
 - **`S`** — fraction of plant-available water remaining. Not a soil-moisture reading. An estimate.
-- **`B`** — base daily depletion for this pot. **The only learned parameter.** Typical starting
-  value 0.10–0.14 (a 7–10 day dry-down at reference conditions).
+- **`B`** — base daily depletion for this pot. **The only parameter, and the only learned one.**
+  Reference value **0.058**, seeded from the pot facts at setup (§3.2) and fitted from there.
 - **`D`** — today's loss, as a fraction of the reservoir.
+
+**One parameter, on purpose.** An earlier draft carried a separate pot constant `G` alongside `B`.
+They multiply, and `B` is fitted against the finger test — so after calibration the two are
+indistinguishable and one of them is decoration. The pot facts now seed `B` and then step out of the
+way.
 
 ### 3.2 · The factors
 
@@ -69,11 +74,11 @@ alert when S(t) <= 0.25           # top 3–5 cm dry — the Monstera "water now
 |---|---|---|---|
 | **`T` temperature** | `2^((temp_C − 22) / 10)` | 0.35 – 2.2 | Evapotranspiration roughly doubles per +10 °C (Q10 ≈ 2). Reference 22 °C |
 | **`T` cold override** | `× 0.6` when temp < 15 °C | — | Growth stalls. Wet + cold roots = rot. This is a safety rule, not a curve |
-| **`L` light / season** | daylight hours at 44.8 °N, normalised, × window-brightness level | 0.55 – 1.25 | Belgrade: **15h 22m** daylight in late June vs **8h 47m** in late December. Computed from date + latitude — no sensor, no API |
+| **`L` light / season** | `(daylight_h / 12.2)^1.5 × window_factor` | 0.55 – 1.25 | Belgrade: **15h 35m** daylight in late June vs **8h 47m** in late December. The exponent is above 1 because winter costs intensity and sun angle as well as hours. Computed from date + latitude — no sensor, no API |
 | **`H` humidity** | `1 + (60 − RH%) / 100` | 0.85 – 1.30 | Drier air pulls water faster. Central heating in winter drops a Belgrade flat to 30–35% RH |
-| **`G` pot & plant** | product of the constants below | ~0.6 – 2.5 | Fixed per setup, re-entered only after repotting |
 
-**`G` components** — set once at setup:
+**Seeding `B` at setup** — the pot facts multiply into a single starting value,
+`B_init = 0.058 × (material × substrate × fit)`, clamped to a combined factor of 0.55–2.0:
 
 | Component | Options | Multiplier |
 |---|---|---|
@@ -86,6 +91,12 @@ alert when S(t) <= 0.25           # top 3–5 cm dry — the Monstera "water now
 | | Balanced | **1.0** |
 | | Small plant in an oversized pot | **0.7** ⚠️ highest rot risk |
 
+**Where 0.058 comes from.** It is solved backwards from the two intervals the model has to get
+right. Belgrade July (27 °C, 50% RH, 15.4 h daylight) gives `T·L·H = 1.94`; January (22 °C indoors,
+33% RH, 8.8 h) gives `0.78`. Requiring a 0.75 depletion to reach the alert threshold:
+**7 days in July and ~16 in January both solve to B ≈ 0.058.** The same constant reproduces both
+ends of the year, which is the only evidence available before the first real watering.
+
 ### 3.3 · The learning loop — this is the part that matters
 
 When the alert fires, the app does **not** say "water now". It says:
@@ -95,11 +106,11 @@ When the alert fires, the app does **not** say "water now". It says:
 
 | Answer | Action | Effect on `B` |
 |---|---|---|
-| Still wet | Snooze 2 days, ask again | `B × 0.85` — model was too fast |
-| Just barely dry | Water now. Perfect hit | unchanged ✅ |
-| Bone dry / drooping | Water now | `B × 1.20` — model was too slow |
+| Still wet | No watering recorded. `S += 0.10` — the pot had more left than modelled, so the next alert arrives on its own in a day or two | `B × 0.85` — model was too fast |
+| Just barely dry | Water now, `S = 1.0`. Perfect hit | unchanged ✅ |
+| Bone dry / drooping | Water now, `S = 1.0` | `B × 1.20` — model was too slow |
 
-`B` is clamped to [0.04, 0.30] so a single mis-tap cannot break the model. **Convergence: 2–3
+`B` is clamped to [0.015, 0.25] so a single mis-tap cannot break the model. **Convergence: 2–3
 cycles.** Logged every time, so the hit rate from §1 is measurable rather than felt.
 
 ### 3.4 · Hard safety rules that override the model
@@ -108,7 +119,7 @@ The model is a guess; these are not. They win over any computed date.
 
 | Rule | Why |
 |---|---|
-| **Never alert sooner than 7 days after the last watering** | No plausible indoor condition dries a Monstera pot faster. A shorter interval means the model is broken, not the plant thirsty |
+| **Never alert sooner than 4 days after the last watering** | Terracotta plus a chunky aroid mix in a hot July genuinely can dry in 4–5 days, so this floor sits low. Anything under it means the model is broken, not the plant thirsty |
 | **Never alert sooner than 10 days between 1 Nov and 28 Feb** | Dormancy + low light. Winter overwatering is the classic way to kill this plant |
 | **If temp < 12 °C, suppress alerts entirely and warn** | Cold damage risk. Watering is not the problem to solve that week |
 | **Alerts fire in the morning** | Watering in the evening leaves a cold wet root ball overnight |
@@ -156,164 +167,141 @@ Credibility is the whole asset here. Three explicit boundaries:
 | Sticky residue, fine webbing | Pests (scale / spider mites) | Outside this app's scope |
 
 ---
-
-## 6 · Decisions — answered 2026-09-13
+## 6 · Decisions — closed 2026-09-13
 
 | # | Decision | Answer |
 |---|---|---|
-| **D1** | Alert channel | **Telegram bot.** Already wired into the AI OS, pushes to the phone, and the three feedback buttons are native inline keyboards — no UI to build |
-| **D2** | Environment data | **Xiaomi Smart Air Purifier 4 Pro**, read directly. See §7 — this is now the most interesting part of the build, and it opens one sub-question |
-| **D3** | Scope | **Multi-plant data model, one profile shipped (Monstera).** Adding a ficus later is a config entry, not a refactor |
+| **D1** | Alert channel | **Telegram bot.** The three feedback buttons are native inline keyboards — no UI to build |
+| **D2** | Environment data | **Xiaomi Smart Air Purifier 4 Pro**, read from **Xiaomi's cloud**, not the LAN. See §7 |
+| **D3** | Scope | **Multi-plant, multi-user data model; one profile shipped (Monstera).** Adding a species later is a config entry |
 | **D4** | Feedback | **Full loop.** Finger test on every alert, three-button answer, `B` recalibrates |
+| **D5** | Setup | **Everything is collected in a Telegram onboarding wizard**, including an optional photo. No config file for plant facts |
+| **D6** | Repo | **Public.** MIT, self-hosted — anyone running it uses their own bot token |
 
-**D2 is a genuinely better answer than the hybrid I proposed.** A weather API plus a guessed indoor
-offset is a model of the apartment; the purifier is a thermometer *in* the apartment. It removes the
-single largest source of error in §3, which was the winter case: outdoor −2 °C while the room sits at
-23 °C on radiators.
+**D2 turned out better than the hybrid originally proposed.** A weather API plus a guessed indoor
+offset is a model of the apartment; the purifier is a thermometer *in* it. It removes the model's
+largest error source, which was winter: outdoor −2 °C while the room sits at 23 °C on radiators.
 
----
-
-## 7 · The sensor — Xiaomi Smart Air Purifier 4 Pro
-
-### 7.1 · What it gives, and that it is reachable
-
-The Air Purifier 4 Pro is model **`zhimi.airp.vb4`**, and it is supported by
-[python-miio](https://python-miio.readthedocs.io/en/latest/api/miio.integrations.zhimi.airpurifier.airpurifier_miot.html)
-via the `AirPurifierMiot` class over Xiaomi's MIoT protocol. It exposes, among other properties:
-
-| Property | Used for |
-|---|---|
-| `temperature` | **`T` factor** — replaces the weather API entirely |
-| `humidity` | **`H` factor** — replaces the estimate entirely |
-| `fan_level` / `mode` | Candidate **`F` factor**, see §7.4. Not in v1 |
-| `aqi` (PM2.5), PM10 | Not used. Interesting, irrelevant to watering |
-
-This is a **local network** protocol, not a cloud API. It needs two things: the device's **LAN IP**
-and its **32-character device token**. That has one consequence that shapes the whole architecture —
-§8.
-
-> ⚠️ **Vadim does the token extraction himself.** It is pulled from the Xiaomi account with the
-> standard `Xiaomi-cloud-tokens-extractor` tool, which wants the Mi account login. I do not touch
-> those credentials at any point. The token goes into `.env`, which is already gitignored.
-
-### 7.2 · Two things to verify before writing a line of code
-
-1. **Is the purifier in the same room as the Monstera?** If it is in the bedroom and the plant is in
-   the living room, the reading is precise and wrong. Same room, and ideally not blowing directly at
-   the plant.
-2. **Does its temperature reading match reality?** Sensors mounted inside a running appliance sit
-   near their own electronics and in their own airflow, and typically read warm. Before trusting it:
-   put any independent thermometer next to the purifier for an hour and compare. Whatever the gap
-   is, it becomes a fixed `sensor_offset_c` in the config.
-
-   This matters more than it sounds. `T` doubles per +10 °C, so a **+2 °C** sensor bias inflates
-   every daily depletion estimate by about **15%** — which is the difference between a 12-day and a
-   14-day winter interval, in exactly the season where erring wet is how the plant dies.
-
-   Mitigating detail: the §3.3 feedback loop absorbs a constant bias anyway, because `B` moves to
-   compensate. So a wrong offset costs accuracy for two or three cycles, not forever. Calibrate
-   anyway — it makes the first month right instead of the second.
-
-### 7.3 · Failure handling — the sensor will be unreachable sometimes
-
-Purifier off, unplugged, moved, Wi-Fi rebooted, token rotated. The model must degrade, not stop:
-
-| Reading age | Behaviour |
-|---|---|
-| < 36 h | Use it. Normal operation |
-| 36 h – 7 days | Use the last known value, unchanged. Indoor temperature in a heated flat moves slowly; this costs almost nothing |
-| > 7 days | Fall back to a seasonal default for Belgrade, and **say so in the alert**: "running without a sensor reading since \<date\>" |
-| Reading out of plausible range (< 5 °C or > 40 °C, RH < 10% or > 95%) | Discard, treat as missing. A sensor fault must never become a watering decision |
-
-### 7.4 · A free extra the purifier makes possible — not v1
-
-We are already reading the device state, so `fan_level` is available at no cost. A purifier running
-on high moves air across the leaves, which raises transpiration. Physically real, probably a
-5–15% effect, and entirely swamped by `B` recalibration if the fan setting is steady.
-
-**Deliberately excluded from v1.** It is only worth adding if the logged data later shows that alert
-accuracy is worse in weeks when the fan ran hard. That is a question the accuracy log can answer on
-its own, which is the right reason to add a factor rather than a plausible story about airflow.
+**The sensor is 2 m away in the adjacent room, and is deliberately not calibrated.** That is the
+right call and costs almost nothing: a *constant* offset — whether from the sensor sitting inside a
+running appliance or from the room next door — is fully absorbed by `B` within two or three cycles,
+because `B` is fitted against the finger test, not against the thermometer. `sensor_offset_c` stays
+in the config, defaulting to `0.0`, in case `/stats` later shows a seasonal pattern rather than a
+constant one. Only a *varying* difference would hurt, and a 2 m gap through a doorway does not
+produce one.
 
 ---
 
-## 8 · Architecture — the one thing still open
+## 7 · The sensor — Xiaomi Smart Air Purifier 4 Pro, via the cloud
 
-**The conflict:** D1 wants alerts that arrive whether or not the laptop is open. D2's sensor is on
-the home LAN and cannot be read from a VPS. Those pull in opposite directions.
+### 7.1 · Why the cloud, not the LAN
 
-| | **A · Mac only** *(recommended for v1)* | **B · Split: Mac collects, VPS alerts** |
+`python-miio` speaks the MIoT protocol over the local network, which a VPS cannot reach. But the
+device also reports to Xiaomi's cloud, and the cloud is reachable from anywhere. That single fact
+removes the Mac from the architecture entirely — see §8.
+
+| Path | How | Verdict |
 |---|---|---|
-| Where the model runs | Mac, `launchd`, once a day | Existing VPS, cron |
-| How the reading arrives | Direct LAN poll of the purifier | Mac polls the purifier, POSTs the reading to the VPS |
-| Telegram button taps | Collected by `getUpdates` polling on the next run — **no webhook, no always-on listener** | Webhook or long-poll on the VPS |
-| Moving parts | One script, one plist, one JSON file | Two services, one endpoint, one shared secret |
-| Fails when | The Mac is closed for days | Almost never |
-| Effort | ~1 evening | ~2–3× that |
+| **Xiaomi cloud** via [`micloud`](https://github.com/Squachen/micloud) | Mi account login → `get_devices()` → MIoT property read. EU region is the `de` server | **Chosen.** ~40 lines, works from anywhere |
+| Xiaomi's own [OAuth2 MIoT cloud](https://github.com/XiaoMi/ha_xiaomi_home) | The official integration's `miot_cloud` module — OAuth, no stored password, MQTT push | Better auth story, heavier to lift out of a Home Assistant integration. The upgrade path if `micloud` breaks |
+| WireGuard/Tailscale tunnel into the flat | VPS joins the home network | Needs an always-on device or a capable router at home. More setup than the cloud for no gain |
+| Local LAN (`python-miio`) | Direct, fastest, no account | Only if the bot ever moves back onto a machine at home |
 
-**Recommendation: A.** It is the whole product in one script, with direct access to the sensor and
-no infrastructure. `launchd` runs a missed daily job at the next wake, so a morning alert lands when
-the laptop opens — which is when he would water anyway.
+The `EnvSource` interface in §9 exists precisely so this is a one-class swap.
 
-**The known hole in A, stated plainly:** **7–17 November**, ten days in Germany and Austria with the
-laptop presumably closed at least part of it. That is one missed watering window. Two honest ways to
-handle it without building B: the model can fire an early "you are about to travel, water it
-thoroughly before you go" alert from a manually entered away-window, and can suppress alerts during
-it. That is ten lines of code instead of a second service.
+### 7.2 · The exact properties
 
-**B is a clean upgrade, not a rewrite** — the collector/model split is in the design from day one,
-so promoting it later means changing where two functions run, not restructuring anything.
+From the [MIoT spec for `zhimi.airp.vb4`](https://home.miot-spec.com/spec/zhimi.airp.vb4):
+
+| Reading | siid | piid | Type | Used for |
+|---|---|---|---|---|
+| `temperature` | **3** | **7** | float, −30…100 °C | the `T` factor |
+| `relative-humidity` | **3** | **1** | uint8, 0–100 % | the `H` factor |
+| `pm2.5-density` | 3 | 4 | float | not used |
+| `on` | 2 | 1 | bool | liveness check |
+| `fan-level` | 2 | 5 | uint8 | candidate `F` factor, §7.4. Not in v1 |
+
+> ⚠️ **Vadim supplies the Mi account credentials himself**, into `.env` on the VPS. They are never
+> committed, never pasted into a chat, and the repo ships `.env.example` only. The device id comes
+> from one `get_devices()` call at setup.
+
+### 7.3 · Failure handling — three rungs
+
+The purifier gets switched off, unplugged, or Xiaomi rotates something. The model degrades, never stops:
+
+| Condition | Behaviour |
+|---|---|
+| Cloud read succeeds, values plausible | Use it |
+| Read fails, or device offline, last good reading < 7 days old | Use the last good reading unchanged. Indoor temperature in a heated flat moves slowly; this costs almost nothing |
+| Last good reading > 7 days old | Fall back to an Open-Meteo outdoor reading plus an explicit indoor model, and **say so in the alert** |
+| Any reading outside 5–40 °C or 10–95 % RH | Discard as a fault. A broken sensor must never become a watering decision |
+
+### 7.4 · A free extra — deliberately not in v1
+
+`fan_level` comes back in the same call. A purifier on high moves air across the leaves and raises
+transpiration — physically real, probably 5–15%, and swamped by `B` recalibration if the fan setting
+is steady. It earns a place only if the accuracy log later shows worse hit rates in high-fan weeks.
+That is a question the log can answer on its own, which is the right reason to add a factor rather
+than a plausible story about airflow.
+
+---
+
+## 8 · Architecture — resolved
+
+**One Python process on the existing VPS. No Mac, no webhook, no public HTTPS, no inbound ports.**
+
+```
+          Xiaomi cloud  ──(1/day, HTTPS out)──┐
+                                              ▼
+Telegram  ──(long-poll getUpdates, HTTPS out)──►  bot process (systemd)
+                                              │      │
+          Open-Meteo ──(fallback only)────────┘      ▼
+                                                  state.json
+```
+
+Three things make this smaller than it looks:
+
+1. **Telegram long-polling** (`getUpdates`) means the bot reaches out, so there is no webhook, no TLS
+   certificate, and nothing listening on a public port.
+2. **The sensor comes over the cloud**, so the process does not need to be on the home network.
+3. **A once-daily tick** is all the model needs. The conversational half is event-driven and cheap.
+
+**What this buys over the earlier Mac plan:** alerts keep arriving during the **7–17 November** trip
+to Germany and Austria, so the away-window handling in §9 is a convenience rather than a patch over
+a gap.
 
 ---
 
 ## 9 · Scope
 
 ### In v1
-- Telegram bot: one daily check, alert + three inline buttons, plus a `/watered` command
-- The §3 water-balance model, evaluated once daily
-- Daylight from date + Belgrade latitude — pure arithmetic, no dependency
-- Temperature and humidity from the Air Purifier 4 Pro, with `sensor_offset_c` and the §7.3 fallback ladder
-- Plant profiles as data (multi-plant capable); **Monstera deliciosa is the only profile shipped**
+- Telegram bot: an onboarding wizard, a daily check, the alert with three inline buttons, `/watered`, `/stats`, `/away`
+- Optional **photo in onboarding** → a vision call proposes the pot and plant facts → user confirms or corrects
+- The §3 water-balance model, one tick a day at 09:00 Europe/Belgrade
+- Daylight from date + latitude — pure arithmetic, no dependency
+- Temperature and humidity from the Air Purifier 4 Pro via Xiaomi cloud, with the §7.3 ladder
+- `EnvSource` interface with a **weather fallback**, which doubles as the path for anyone without a Xiaomi purifier
+- Plant profiles as data; **Monstera deliciosa is the only profile shipped**
 - The §3.3 feedback loop and `B` recalibration
-- The four §3.4 safety overrides
-- A local JSON log: every reading, every alert, every answer, every `B` change
-- `/stats` — the accuracy counter from §1, so the model can be judged instead of trusted
-- An away-window (§8) so the November trip does not silently break the record
+- The §3.4 safety overrides
+- A local JSON store: every reading, alert, answer and `B` change
+- An away-window so a trip does not silently break the record
 
 ### Explicitly not in v1
-Fertilizer track · repotting reminders · the §5 symptom decoder · the `F` airflow factor · photos
-and growth log · charts · any web UI · any second plant profile · any cloud account beyond Telegram
+Fertilizer track · repotting reminders · the §5 symptom decoder · the `F` airflow factor · growth
+log and charts · any web UI · any second species profile · a hosted multi-tenant instance
 
 ### Non-functional
-- **Python 3.11+** in a venv — `python-miio` needs it, and the system Python here is 3.9.6
-- Dependencies kept to `python-miio` and one Telegram client. The model itself is stdlib arithmetic
-- Secrets in `.env` — Telegram token, device token, device IP. Never in a tracked file
-- **Repo is English-only and safe to publish.** A calibrated water-demand model with a documented
-  accuracy metric is a decent small public artifact; there is nothing confidential in it
+- **Python 3.11+**, venv, systemd unit. Dependencies: a Telegram client, `micloud`, `anthropic`, `requests`
+- Secrets in `.env` — Telegram token, Mi account, device id, Anthropic key. Never in a tracked file
+- **Public, MIT, self-hosted.** Anyone running it brings their own bot token and their own state file.
+  No shared instance — that would make the operator a data processor for other people's home telemetry
+- The bot runs without an Anthropic key; the photo step simply disappears
 
 ---
 
-## 10 · Open questions for Vadim
+## 10 · Implementation
 
-1. **Architecture A or B?** §8. Recommendation is A.
-2. **Is the purifier in the same room as the Monstera?** §7.2. If not, the whole D2 answer weakens
-   and the hybrid from the original D2 comes back.
-3. **Pot facts, for `G` in §3.2** — material (terracotta or plastic/glazed), rough diameter,
-   substrate (chunky aroid mix or normal potting soil), and how the plant sits in it (root-bound,
-   balanced, or small plant in a big pot). Guessing these costs two or three extra calibration
-   cycles; a 30-second answer removes that.
-4. **When was it last watered, and roughly how often have you been watering it?** Seeds `B` near the
-   truth instead of at a generic default, and starts the log with a real state instead of an empty one.
-5. **Public repo or private?** Affects the README's register, nothing else. Default: build it
-   publishable, decide at push time.
-
----
-
-## 11 · What happens after approval
-
-1. Vadim edits this file / answers §10 → approves
-2. `SPEC.md` — data model, module boundaries, the exact Telegram copy, config schema, and test cases
-   with expected intervals
-3. Build, then a **backtest before it ever sends an alert**: run the model over a synthetic Belgrade
-   year and confirm the predicted intervals are sane — roughly **6–8 days in July, 14–18 in January**.
-   If the backtest disagrees with that, the coefficients are wrong and the plant never finds out
+Everything above is the *what* and the *why*. The *how* — data model, module boundaries, the exact
+wizard steps and copy, config schema, the seeded `B` arithmetic, and the test cases — is in
+[`SPEC.md`](SPEC.md).

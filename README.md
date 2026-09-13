@@ -13,12 +13,12 @@ Environment readings come from a **Xiaomi Smart Air Purifier 4 Pro** sitting in 
 real thermometer in the actual apartment, rather than a weather API and a guess about the indoor
 offset. Alerts and the feedback buttons run over a **Telegram bot**.
 
-**Status: v0 brief, rev. 1 — pending review.** Nothing is implemented yet.
+**Status: spec approved, implementation not started.**
 
 | Document | What it is |
 |---|---|
-| [`PRODUCT-BRIEF.md`](PRODUCT-BRIEF.md) | The problem, the model, the Monstera facts it encodes, and the open decisions. **Read this first.** |
-| `SPEC.md` | Not written yet — comes after the brief is approved |
+| [`SPEC.md`](SPEC.md) | The build document — architecture, data model, the wizard, the tick, the tests. **Start here to implement.** |
+| [`PRODUCT-BRIEF.md`](PRODUCT-BRIEF.md) | The problem, how the model was derived, and the Monstera facts it encodes. **Start here to understand.** |
 
 ## Design principles
 
