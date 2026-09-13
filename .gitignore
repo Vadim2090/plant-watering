@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# Secrets & local config
+.env
+.env.local
+config.local.json
+
+# Local state (the app's own database)
+data/*.json
+data/*.db
+!data/.gitkeep
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Build output
+dist/
+build/
