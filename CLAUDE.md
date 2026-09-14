@@ -16,8 +16,26 @@ Where the two disagree, **`SPEC.md` is newer.**
 
 ## Status
 
-**Spec approved 2026-09-13. Implementation not started.** No code exists yet — `SPEC.md §11` names
-the module layout to create.
+**Built 2026-09-13 against SPEC v1.** `pytest` covers §12.1 and §12.2; `python backtest.py` passes
+§12.3 (July 7 d, January 17 d). Not yet done from §13: a live end-to-end run in a real Telegram
+chat (items 3–5) — the Telegram, Xiaomi cloud and vision paths are wired but have only been
+exercised with fakes.
+
+**Codex review 2026-09-13, 13 findings, all fixed** (94 tests). Two of them settled a spec reading —
+do not re-open without saying so: the `/stats` metric is a share of *alerts* (an alert closed by
+`/watered` stays in the denominator as "closed without a check"), and when setup gets no reading
+from any source the plant is seeded from the pot facts alone with `last_tick_date` left on the
+watering day, so the first real tick catches up instead of advancing `S` on invented data (§5.3
+step 5).
+
+**Photo step uses OpenAI, not Anthropic (2026-09-14).** `vision.py` calls OpenAI
+(`gpt-4o-mini`, structured outputs) and the key is `PERSONAL_OPENAI_API_KEY`; SPEC §8 carries a
+dated note. The step stays optional - absent key, it is skipped.
+
+**Layout deviates from `SPEC.md §11` in two files:** `tick.py` holds the daily tick and the plant
+operations shared by the wizard and the commands (so the §12.2 cases run without telebot), and
+`context.py` holds `AppContext`, the object through which every side effect enters (clock, send,
+sources, vision). `bot.py` is wiring only.
 
 ---
 

@@ -1,0 +1,25 @@
+# systemd unit. Install:
+#   sudo cp deploy/plant-watering.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now plant-watering
+# Adjust User, WorkingDirectory and the venv path to your checkout.
+
+[Unit]
+Description=Plant watering Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=plant
+WorkingDirectory=/opt/plant-watering
+ExecStart=/opt/plant-watering/.venv/bin/python bot.py
+Restart=always
+RestartSec=10
+# .env is read by the process itself; keep it chmod 600 and owned by User.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/plant-watering/data
+
+[Install]
+WantedBy=multi-user.target

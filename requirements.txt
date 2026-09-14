@@ -1,0 +1,4 @@
+pyTelegramBotAPI>=4.14
+requests>=2.31
+micloud>=0.6
+openai>=1.40

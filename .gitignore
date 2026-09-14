@@ -23,3 +23,11 @@ data/*.db
 # Build output
 dist/
 build/
+
+# App state and user photos (SPEC.md rule 1 - nothing personal in a tracked file)
+data/photos/
+data/*.tmp
+
+# Runtime logs
+data/*.log
+*.log

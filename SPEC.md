@@ -372,6 +372,11 @@ the feedback loop is for; making the user guess at setup is not.
 
 ## 8 · The photo step
 
+> **Deviation, 2026-09-14:** implemented against **OpenAI** (`gpt-4o-mini`, structured
+> outputs), not Anthropic, because that is the key available (`PERSONAL_OPENAI_API_KEY`). The
+> field list, `unclear`-first behaviour and graceful fall-through are exactly as below; only the
+> provider and call shape differ. See `vision.py`.
+
 **Purpose: collapse steps 2–5 into one confirmation tap.** Nothing more. Every extracted field is a
 *proposal* the user confirms or overrides, and `unclear` is a first-class answer that routes straight
 to the corresponding question.
