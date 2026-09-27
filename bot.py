@@ -193,7 +193,8 @@ def main() -> int:
     def allowed(chat_id: int) -> bool:
         if config.is_allowed(chat_id):
             return True
-        log.info("ignoring chat not in ALLOWED_CHAT_IDS")
+        # a chat id is not a secret; logging it here (gitignored log) is how you allowlist a group
+        log.info("ignoring chat %s - add it to ALLOWED_CHAT_IDS to enable", chat_id)
         return False
 
     @bot.message_handler(content_types=["photo"])

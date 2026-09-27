@@ -391,3 +391,18 @@ def test_buttons_on_an_older_alert_do_not_score_the_open_one(tmp_path):
     assert p["pending_alert"] is not None and p["B"] == B and "older alert" in sent.last[1]
     commands.dispatch_callback(ctx, CHAT, new_mid, "ans:monstera-1:bone_dry")
     assert p["pending_alert"] is None and p["B"] == pytest.approx(B * 1.2, abs=1e-4)
+
+
+def test_group_chat_skips_photo_step(tmp_path):
+    # a group (negative chat_id): the photo step is skipped even with vision configured
+    ctx, sent, _ = make_ctx(tmp_path, primary=FakeSource("weather", [reading(29, 45, "weather")]),
+                            vision=lambda jpeg: {"species_guess": "monstera_deliciosa"})
+    GROUP = -1001234567890
+    from state import is_onboarded
+    user = ctx.state.ensure_user(GROUP, "en", ctx.now())
+    import onboarding
+    onboarding.start_wizard(ctx, GROUP, user)
+    assert "photo" not in sent.texts[-2].lower()  # no photo invitation
+    assert "What is the pot made of" in sent.last[1]
+    # a photo sent into the group is ignored, not treated as onboarding input
+    assert onboarding.handle_photo(ctx, GROUP, user, b"x") is False

@@ -26,6 +26,14 @@ from tick import advance_plant, implied_interval_days, latitude_for, predict_dry
 
 CB_PREFIX = "ob"
 
+
+def _is_group(chat_id) -> bool:
+    """Telegram group and supergroup chat ids are negative."""
+    try:
+        return int(chat_id) < 0
+    except (TypeError, ValueError):
+        return False
+
 # Step keys
 WELCOME = "welcome"
 PHOTO_REVIEW = "photo_review"
@@ -101,8 +109,8 @@ def start_wizard(ctx: AppContext, chat_id: int, user: dict, plant_id: str | None
     ob["draft"] = {"plant_id": plant_id or (existing[0]["id"] if existing else _next_plant_id(user))}
     ob["step"] = WELCOME
     ctx.state.save()
-    if ctx.vision is None:
-        # no API key: the photo step does not exist (§3), so do not invite a photo
+    if ctx.vision is None or _is_group(chat_id):
+        # no API key, or a group where privacy mode blocks receiving the photo: skip the photo step
         ctx.send(chat_id, ctx.t("welcome_no_photo"), None)
         ask(ctx, chat_id, user, POT_MATERIAL)
         return
@@ -168,7 +176,7 @@ def _after(step: str) -> str:
 def handle_photo(ctx: AppContext, chat_id: int, user: dict, jpeg: bytes) -> bool:
     """A photo during `welcome`. Returns False when the photo was not expected."""
     ob = _ob(user)
-    if ob.get("step") != WELCOME or ctx.vision is None:
+    if ob.get("step") != WELCOME or ctx.vision is None or _is_group(chat_id):
         return False
     draft = ob["draft"]
     if ctx.save_photo is not None:
